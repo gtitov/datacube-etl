@@ -1,0 +1,25 @@
+```{r}
+library(sf)
+library(h3jsr)
+library(dplyr)
+```
+
+```{r}
+seas = st_read("./data/rusarticseas.geojson")
+h3_cells = seas %>% 
+  polygon_to_cells(5) %>% 
+  lapply(as_tibble) %>% 
+  bind_rows() %>% 
+  rename(h3 = value) %>% 
+  mutate(
+    geometry = cell_to_point(h3)
+  ) %>% 
+  st_as_sf() %>% 
+  mutate(
+    lon = st_coordinates(.)[, 1],
+    lat = st_coordinates(.)[, 2],
+  )
+st_write(h3_cells, "./data/grid.geojson")
+```
+
+

@@ -1,0 +1,170 @@
+```{r}
+library(terra)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(RPostgres)
+```
+
+```{r}
+# basis for transformation
+crs100km = crs("+proj=stere +lat_0=90 +lon_0=-45 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +pm=0 +no_defs +to_meter=100000")
+grid = vect("grid.geojson") %>%   # see grid_extract.Rmd
+  project(crs100km)
+grid_attributes = as.data.frame(grid)
+```
+
+```{r}
+phy2h3 = function(path, tablename) {
+  # read
+  print(paste0(path, "🔄"))
+  month = basename(path) %>% 
+    str_sub(1, 6) %>% 
+    as.numeric()
+  r = rast(path)
+  crs(r) = crs100km
+  
+  # transform
+  extracted_h3 = terra::extract(r, grid, method = "bilinear", ID = F, na.rm = T) %>% 
+    bind_cols(h3 = grid_attributes$h3)
+  pivoted_h3 = extracted_h3 %>% 
+    pivot_longer(
+      !(h3),
+      names_to = "d",
+      values_to = "value"
+    ) %>% 
+    mutate(
+      variable = str_extract(d, ".+(?=_depth=)|.+$"),
+      depth = str_extract(d, "(?<=_depth=)\\d+$") %>% as.integer()
+    ) %>% 
+    select(-d) %>% 
+    pivot_wider(
+      names_from = variable,
+      values_from = value
+    ) %>% 
+    mutate(month) %>% 
+    relocate(h3, depth, month)
+  
+  # load
+  print(paste0(path, "🌐"))
+  con = dbConnect(
+    RPostgres::Postgres(),
+    user="postgres",
+    password="391110",
+    host="10.1.100.31",
+    port=5432,
+    dbname="datacube"
+  )
+  dbWriteTable(con, tablename, pivoted_h3, append = TRUE)
+  dbDisconnect(con)
+  
+  print(paste0(path, "✅"))
+  return(path)
+}
+```
+
+```{r}
+paths = list.files("./data/phy", recursive = T, full.names = T)
+sapply(paths, phy2h3, tablename = "phy")
+```
+
+```{r}
+paths = list.files("./data/bgc", recursive = T, full.names = T)
+sapply(paths, phy2h3, tablename = "bgc")
+```
+
+
+
+```{r eval=FALSE}
+path = "./phy/2022/202206_mm-metno-MODEL-topaz4-ARC-fv02.0.nc"
+path = "./bgc/2022/202206_mm-metno-MODEL-topaz5_ecosmo-ARC-fv02.0.nc"
+
+month = basename(path) %>% 
+  str_sub(1, 6) %>% 
+  as.integer()
+
+r = rast(path)
+crs(r) = crs100km
+# plot(r$`temperature_depth=5`)
+# plot(r$`nppv_depth=0`)
+# plot(grid, add=TRUE)
+extracted_h3 = terra::extract(r, grid, method = "bilinear", ID = F, na.rm = T) %>% 
+  bind_cols(h3 = grid_attributes$h3)
+
+pivoted_h3 = extracted_h3 %>% 
+  pivot_longer(
+    !(h3),
+    names_to = "d",
+    values_to = "value"
+  ) %>% 
+  mutate(
+    variable = str_extract(d, ".+(?=_depth=)|.+$"),
+    depth = str_extract(d, "(?<=_depth=)\\d+$") %>% as.integer()
+  ) %>% 
+  select(-d) %>% 
+  pivot_wider(
+    names_from = variable,
+    values_from = value
+  ) %>% 
+  mutate(month) %>% 
+  relocate(h3, depth, month)
+
+con = dbConnect(
+  RPostgres::Postgres(),
+  user="postgres",
+  password="391110",
+  host="10.1.100.31",
+  port=5432,
+  dbname="datacube"
+)
+dbWriteTable(con, 'phy', pivoted_h3, overwrite = TRUE)
+dbDisconnect(con)
+```
+
+
+```{r eval=FALSE}
+path = "./bgc/2022/202206_mm-metno-MODEL-topaz5_ecosmo-ARC-fv02.0.nc"
+month = basename(path) %>% 
+  str_sub(1, 6) %>% 
+  as.integer()
+
+r = rast(path)
+crs(r) = crs100km
+# plot(r$`nppv_depth=0`)
+# plot(grid, add=TRUE)
+extracted_h3 = terra::extract(r, grid, method = "bilinear", ID = F, na.rm = T) %>%
+  bind_cols(h3 = grid_attributes$h3)
+
+pivoted_h3 = extracted_h3 %>% 
+  pivot_longer(
+    !(h3),
+    names_to = "d",
+    values_to = "value"
+  ) %>% 
+  mutate(
+    variable = str_extract(d, ".+(?=_depth=)|.+$"),
+    depth = str_extract(d, "(?<=_depth=)\\d+$") %>% as.integer()
+  ) %>% 
+  select(-d) %>% 
+  pivot_wider(
+    names_from = variable,
+    values_from = value
+  ) %>% 
+  mutate(month) %>% 
+  relocate(h3, depth, month)
+
+con = dbConnect(
+  RPostgres::Postgres(),
+  user="postgres",
+  password="391110",
+  host="10.1.100.31",
+  port=5432,
+  dbname="datacube"
+)
+
+dbWriteTable(con, 'bgc', pivoted_h3, overwrite = TRUE)
+dbDisconnect(con)
+```
+
+
+
